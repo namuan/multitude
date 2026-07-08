@@ -412,36 +412,49 @@ final class MultitudeModel: NSObject, ObservableObject {
     }
 
     /// Shows a confirmation alert with a browser picker.
+    /// The URL goes in `informativeText` for natural sizing. The browser
+    /// picker sits in a fixed-width accessory view that anchors the dialog
+    /// width, so the buttons stay in the same place for every link.
     /// Returns the user's choice and the selected browser bundle ID.
     private func askToOpenExternally(url: URL, domain: String) -> (result: AskExternalLinkResult, browserBundleID: String?) {
         let alert = NSAlert()
-        alert.messageText = "Open \(domain)?"
+        alert.messageText = "Open \(domain) in your default browser?"
         alert.informativeText = url.absoluteString
         alert.addButton(withTitle: "Open Once")
         alert.addButton(withTitle: "Always Open")
         alert.addButton(withTitle: "Cancel")
-        // Set the cancel button as the default (Escape key)
         alert.buttons.last?.keyEquivalent = "\u{1b}"
 
-        // Browser picker accessory
-        let popUp = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 220, height: 22))
+        // ── Browser picker inside a fixed-frame container ──
+        // Container uses a frame so NSAlert can position it. Subviews use
+        // Auto Layout so the popup stretches to fill the row width.
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 22))
+
+        let pickerLabel = NSTextField(labelWithString: "Open with:")
+        pickerLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize(for: .small))
+        pickerLabel.translatesAutoresizingMaskIntoConstraints = false
+        pickerLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        let popUp = NSPopUpButton()
         popUp.addItem(withTitle: "System Default")
         for browser in installedBrowsers {
             popUp.addItem(withTitle: browser.displayName)
         }
+        popUp.translatesAutoresizingMaskIntoConstraints = false
+        popUp.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        let label = NSTextField(labelWithString: "Open with:")
-        label.font = NSFont.systemFont(ofSize: NSFont.systemFontSize(for: .small))
-        label.isBezeled = false
-        label.drawsBackground = false
-        label.isEditable = false
+        container.addSubview(pickerLabel)
+        container.addSubview(popUp)
 
-        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 340, height: 22))
-        stack.orientation = .horizontal
-        stack.spacing = 8
-        stack.addArrangedSubview(label)
-        stack.addArrangedSubview(popUp)
-        alert.accessoryView = stack
+        NSLayoutConstraint.activate([
+            pickerLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            pickerLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            popUp.leadingAnchor.constraint(equalTo: pickerLabel.trailingAnchor, constant: 8),
+            popUp.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -2),
+            popUp.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+        ])
+
+        alert.accessoryView = container
 
         let response = alert.runModal()
         let selectedIndex = popUp.indexOfSelectedItem
