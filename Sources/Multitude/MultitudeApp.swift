@@ -22,6 +22,12 @@ struct MultitudeApp: App {
 
                 Divider()
 
+                Button("External Link Rules…") {
+                    model.showingExternalLinkConfig = true
+                }
+
+                Divider()
+
                 // Room-switching shortcuts (⌘1-⌘9)
                 ForEach(Array(model.accounts.prefix(9).enumerated()), id: \.element.id) { i, account in
                     Button {

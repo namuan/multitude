@@ -38,6 +38,10 @@ struct ServicePillBar: View {
                 .help("Configure services")
                 .padding(.leading, 6)
 
+            navButton(systemName: "arrow.up.right.square", action: { model.showingExternalLinkConfig = true })
+                .help("External link rules")
+                .padding(.leading, 4)
+
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
@@ -50,6 +54,9 @@ struct ServicePillBar: View {
         )
         .sheet(isPresented: $showingServiceConfig) {
             ServiceConfigView(model: model)
+        }
+        .sheet(isPresented: $model.showingExternalLinkConfig) {
+            ExternalLinkConfigView(model: model)
         }
     }
 

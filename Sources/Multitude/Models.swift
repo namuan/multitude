@@ -1,5 +1,45 @@
 import Foundation
 
+// MARK: - External Link Rule
+
+/// A rule that sends matching links to the default browser instead of loading
+/// them inside the room's web view.
+///
+/// Domain matching is a suffix check: a rule for `zoom.us` matches
+/// `zoom.us`, `www.zoom.us` and `app.zoom.us`.
+struct ExternalLinkRule: Identifiable, Codable, Equatable {
+    let id: UUID
+    /// Domain to match against the URL host (case-insensitive).
+    var domain: String
+    /// Whether to open silently or ask for confirmation.
+    var action: LinkAction
+
+    init(id: UUID = UUID(), domain: String, action: LinkAction = .alwaysOpen) {
+        self.id = id
+        self.domain = domain
+        self.action = action
+    }
+}
+
+/// Result from the external link confirmation alert.
+enum AskExternalLinkResult {
+    case openOnce
+    case alwaysOpen
+    case cancel
+}
+
+enum LinkAction: String, Codable, CaseIterable {
+    case alwaysOpen = "alwaysOpen"
+    case ask = "ask"
+
+    var label: String {
+        switch self {
+        case .alwaysOpen: return "Always open externally"
+        case .ask: return "Ask before opening"
+        }
+    }
+}
+
 // MARK: - Account
 
 /// A single account "room" in Multitude.

@@ -23,7 +23,9 @@ final class MultitudeModel: NSObject, ObservableObject {
     @Published var unreadBadges: [UUID: Int] = [:]
     @Published var showingAddAccount = false
     @Published var showingDebugPanel = false
+    @Published var showingExternalLinkConfig = false
     @Published var debugMessages: [String] = []
+    @Published var externalLinkRules: [ExternalLinkRule] = []
 
     // Live web‑view metadata (updated for the active room)
     @Published var currentURL: String = ""
@@ -63,6 +65,10 @@ final class MultitudeModel: NSObject, ObservableObject {
         log.info("Loading enabled services…")
         loadEnabledServices()
         log.info("Enabled services loaded: \(enabledServices.map(\.title).joined(separator: ", "))")
+
+        log.info("Loading external link rules…")
+        loadExternalLinkRules()
+        log.info("External link rules loaded: \(externalLinkRules.count)")
 
         log.info("Loading accounts…")
         loadAccounts()
@@ -107,6 +113,10 @@ final class MultitudeModel: NSObject, ObservableObject {
 
     private static func enabledServicesURL() -> URL? {
         applicationSupportURL()?.appendingPathComponent("enabled_services.json")
+    }
+
+    private static func externalLinkRulesURL() -> URL? {
+        applicationSupportURL()?.appendingPathComponent("external_link_rules.json")
     }
 
     private func loadAccounts() {
@@ -212,6 +222,113 @@ final class MultitudeModel: NSObject, ObservableObject {
 
     var defaultService: GoogleService {
         enabledServices.first ?? .gmail
+    }
+
+    // MARK: - External Link Rules
+
+    static let defaultExternalLinkSuggestions: [ExternalLinkRule] = [
+        ExternalLinkRule(domain: "zoom.us"),
+        ExternalLinkRule(domain: "slack.com"),
+        ExternalLinkRule(domain: "github.com"),
+        ExternalLinkRule(domain: "teams.microsoft.com"),
+        ExternalLinkRule(domain: "notion.so"),
+    ]
+
+    private func loadExternalLinkRules() {
+        guard let url = Self.externalLinkRulesURL(),
+              let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode([ExternalLinkRule].self, from: data)
+        else {
+            FileLogger.shared.info("No saved external link rules found")
+            externalLinkRules = []
+            return
+        }
+        externalLinkRules = decoded
+        FileLogger.shared.debug("Loaded \(externalLinkRules.count) external link rules from \(url.path)")
+    }
+
+    private func saveExternalLinkRules() {
+        guard let url = Self.externalLinkRulesURL(),
+              let data = try? JSONEncoder().encode(externalLinkRules)
+        else {
+            FileLogger.shared.error("Failed to encode or locate external link rules URL for saving")
+            return
+        }
+        try? data.write(to: url, options: .atomic)
+        FileLogger.shared.debug("Saved \(externalLinkRules.count) external link rules to \(url.path)")
+    }
+
+    func addExternalLinkRule(domain: String, action: LinkAction = .alwaysOpen) {
+        let trimmed = domain.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return }
+        guard !externalLinkRules.contains(where: { $0.domain == trimmed }) else {
+            FileLogger.shared.debug("External link rule already exists for domain: \(trimmed)")
+            return
+        }
+
+        let rule = ExternalLinkRule(domain: trimmed, action: action)
+        externalLinkRules.append(rule)
+        saveExternalLinkRules()
+        addDebug("Added external link rule: \(trimmed) (\(action.label))")
+        FileLogger.shared.info("External link rule added: domain=\(trimmed) action=\(action.rawValue)")
+    }
+
+    func removeExternalLinkRule(_ id: UUID) {
+        guard let rule = externalLinkRules.first(where: { $0.id == id }) else {
+            FileLogger.shared.warning("removeExternalLinkRule called for unknown id: \(id)")
+            return
+        }
+        externalLinkRules.removeAll { $0.id == id }
+        saveExternalLinkRules()
+        addDebug("Removed external link rule: \(rule.domain)")
+        FileLogger.shared.info("External link rule removed: domain=\(rule.domain)")
+    }
+
+    func updateExternalLinkRule(_ id: UUID, domain: String, action: LinkAction) {
+        guard let idx = externalLinkRules.firstIndex(where: { $0.id == id }) else {
+            FileLogger.shared.warning("updateExternalLinkRule called for unknown id: \(id)")
+            return
+        }
+        let oldDomain = externalLinkRules[idx].domain
+        externalLinkRules[idx].domain = domain.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        externalLinkRules[idx].action = action
+        saveExternalLinkRules()
+        FileLogger.shared.info("External link rule updated: '\(oldDomain)' → '\(domain)' action=\(action.rawValue)")
+    }
+
+    /// Returns the first rule whose domain matches the URL host (suffix match).
+    private func matchingRule(for url: URL) -> ExternalLinkRule? {
+        guard let host = url.host?.lowercased() else { return nil }
+        return externalLinkRules.first { rule in
+            let domain = rule.domain.lowercased()
+            return host == domain || host.hasSuffix(".\(domain)")
+        }
+    }
+
+    /// Opens a URL in the default system browser.
+    private func openInDefaultBrowser(url: URL) {
+        FileLogger.shared.info("Opening externally: \(url.absoluteString)")
+        addDebug("Opened externally: \(url.absoluteString)")
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Shows a confirmation alert for an `ask`-action rule.
+    /// Returns the user's choice.
+    private func askToOpenExternally(url: URL, domain: String) -> AskExternalLinkResult {
+        let alert = NSAlert()
+        alert.messageText = "Open \(domain) in your default browser?"
+        alert.informativeText = url.absoluteString
+        alert.addButton(withTitle: "Open Once")
+        alert.addButton(withTitle: "Always Open")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return .openOnce
+        case .alertSecondButtonReturn:
+            return .alwaysOpen
+        default:
+            return .cancel
+        }
     }
 
     // MARK: - Account CRUD
@@ -734,9 +851,64 @@ extension MultitudeModel: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, preferences: WKWebpagePreferences, decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
-        let url = navigationAction.request.url?.absoluteString ?? "?"
-        FileLogger.shared.debug("Nav POLICY allow: \(url)")
-        decisionHandler(.allow, preferences)
+        guard let url = navigationAction.request.url else {
+            decisionHandler(.allow, preferences)
+            return
+        }
+
+        let urlStr = url.absoluteString
+        let room = name(for: webView)
+
+        // Only intercept link clicks — not form submissions, JS redirects,
+        // or back/forward navigations. This prevents accidentally breaking
+        // Google sign-in flows or OAuth redirects.
+        guard navigationAction.navigationType == .linkActivated else {
+            FileLogger.shared.debug("Nav POLICY allow: \(urlStr)")
+            decisionHandler(.allow, preferences)
+            return
+        }
+
+        // Check for a matching rule.
+        let existingRule = matchingRule(for: url)
+
+        // If the domain is already saved as alwaysOpen — open silently.
+        if let rule = existingRule, rule.action == .alwaysOpen {
+            FileLogger.shared.info("Nav POLICY external rule '\(rule.domain)' matched (alwaysOpen): \(urlStr) [\(room)]")
+            addDebug("[\(room)] External link rule '\(rule.domain)' matched: \(urlStr)")
+            openInDefaultBrowser(url: url)
+            decisionHandler(.cancel, preferences)
+            return
+        }
+
+        // For unknown domains or domains with the ask action — prompt the user.
+        let domain = existingRule?.domain ?? url.host ?? "this site"
+        FileLogger.shared.info("Nav POLICY prompting for domain: \(domain) [\(room)] url: \(urlStr)")
+        addDebug("[\(room)] Prompting to open externally: \(urlStr)")
+
+        let result = askToOpenExternally(url: url, domain: domain)
+        switch result {
+        case .openOnce:
+            openInDefaultBrowser(url: url)
+            decisionHandler(.cancel, preferences)
+
+        case .alwaysOpen:
+            // Upgrade existing ask rule or create a new one.
+            if let rule = existingRule {
+                if let idx = externalLinkRules.firstIndex(where: { $0.id == rule.id }) {
+                    externalLinkRules[idx].action = .alwaysOpen
+                    saveExternalLinkRules()
+                    addDebug("Rule '\(rule.domain)' upgraded to always open")
+                    FileLogger.shared.info("External link rule '\(rule.domain)' upgraded to alwaysOpen")
+                }
+            } else {
+                addExternalLinkRule(domain: domain, action: .alwaysOpen)
+            }
+            openInDefaultBrowser(url: url)
+            decisionHandler(.cancel, preferences)
+
+        case .cancel:
+            decisionHandler(.cancel, preferences)
+        }
     }
 }
 
