@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>Multitude</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.multitude.macos</string>
+	<key>CFBundleName</key>
+	<string>Multitude</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>LSUIElement</key>
+	<false/>
+
+	<key>NSCameraUsageDescription</key>
+	<string>Multitude needs camera access to let you join video calls in Google Meet.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Multitude needs microphone access to let you speak in Google Meet calls.</string>
+</dict>
+</plist>

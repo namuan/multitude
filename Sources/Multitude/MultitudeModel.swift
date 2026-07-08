@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import UserNotifications
+import AVFoundation
 
 // MARK: - MultitudeModel
 
@@ -71,6 +72,9 @@ final class MultitudeModel: NSObject, ObservableObject {
 
         log.info("Requesting notification permission…")
         requestNotificationPermission()
+
+        log.info("Requesting camera / microphone permission…")
+        requestMediaPermissions()
 
         if let first = accounts.first {
             log.info("Switching to first account: \(first.displayName) (lastService: \(first.lastService.title))")
@@ -532,6 +536,30 @@ extension MultitudeModel {
             }
             FileLogger.shared.info("Notification permission granted: \(granted)")
             print("Multitude notification permission: \(granted)")
+        }
+    }
+
+    /// Proactively request camera and microphone permission at startup so the
+    /// system prompt appears *before* Google Meet tries to use them. Without
+    /// this, WKWebView's `getUserMedia()` may fail silently on modern macOS.
+    private func requestMediaPermissions() {
+        if #available(macOS 14, *) {
+            let camera = AVCaptureDevice.authorizationStatus(for: .video)
+            let mic = AVCaptureDevice.authorizationStatus(for: .audio)
+            FileLogger.shared.info("Media permissions: camera=\(camera.rawValue) mic=\(mic.rawValue)")
+
+            if camera == .notDetermined {
+                AVCaptureDevice.requestAccess(for: .video) { granted in
+                    FileLogger.shared.info("Camera permission: \(granted)")
+                }
+            }
+            if mic == .notDetermined {
+                AVCaptureDevice.requestAccess(for: .audio) { granted in
+                    FileLogger.shared.info("Microphone permission: \(granted)")
+                }
+            }
+        } else {
+            FileLogger.shared.debug("requestMediaPermissions: macOS < 14, skipping")
         }
     }
 
