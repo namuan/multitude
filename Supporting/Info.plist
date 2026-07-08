@@ -14,6 +14,8 @@
 	<string>6.0</string>
 	<key>LSUIElement</key>
 	<false/>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 
 	<key>NSCameraUsageDescription</key>
 	<string>Multitude needs camera access to let you join video calls in Google Meet.</string>
