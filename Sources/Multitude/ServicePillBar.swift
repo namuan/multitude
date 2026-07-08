@@ -5,6 +5,7 @@ import SwiftUI
 /// Toolbar row with navigation controls (left) and pill-shaped service tabs.
 struct ServicePillBar: View {
     @ObservedObject var model: MultitudeModel
+    @State private var showingServiceConfig = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -28,10 +29,14 @@ struct ServicePillBar: View {
 
             // ── Service pills ──
             HStack(spacing: 6) {
-                ForEach(GoogleService.allCases, id: \.self) { service in
+                ForEach(model.enabledServices, id: \.self) { service in
                     pill(for: service)
                 }
             }
+
+            navButton(systemName: "gearshape", action: { showingServiceConfig = true })
+                .help("Configure services")
+                .padding(.leading, 6)
 
             Spacer(minLength: 0)
         }
@@ -43,6 +48,9 @@ struct ServicePillBar: View {
                 .fill(Color(.windowBackgroundColor).opacity(0.85))
                 .background(Material.ultraThin)
         )
+        .sheet(isPresented: $showingServiceConfig) {
+            ServiceConfigView(model: model)
+        }
     }
 
     // MARK: - Nav Button
@@ -69,7 +77,7 @@ struct ServicePillBar: View {
 
     private func pill(for service: GoogleService) -> some View {
         let isActive = model.currentService == service
-        let unread = service == .gmail ? model.unreadBadges[model.activeAccountId ?? UUID()] ?? 0 : 0
+        let unread = service == .gmail ? model.activeAccountId.map { model.unreadBadges[$0] ?? 0 } ?? 0 : 0
         let activeId = model.activeAccountId?.uuidString ?? "nil"
         let badgeCount = model.unreadBadges.count
 
@@ -116,6 +124,75 @@ struct ServicePillBar: View {
         }
         .buttonStyle(.plain)
         .help(unread > 0 ? "\(service.title) — \(unread) unread" : service.title)
+    }
+}
+
+// MARK: - Service Config
+
+struct ServiceConfigView: View {
+    @ObservedObject var model: MultitudeModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Configure Services")
+                    .font(.title2.weight(.semibold))
+                Text("Choose which Google services appear in the toolbar. Services are shown in the order you enable them.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .padding([.top, .horizontal], 20)
+            .padding(.bottom, 12)
+
+            List {
+                ForEach(GoogleService.allAvailable, id: \.self) { service in
+                    Toggle(isOn: binding(for: service)) {
+                        Label {
+                            Text(service.title)
+                        } icon: {
+                            Image(systemName: service.symbol)
+                                .foregroundStyle(.secondary)
+                                .frame(width: 18)
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                    .disabled(model.enabledServices.count == 1 && model.enabledServices.contains(service))
+                    .help(disableHelp(for: service))
+                }
+            }
+            .listStyle(.inset)
+            .frame(minHeight: 320)
+
+            Divider()
+
+            HStack {
+                Text("At least one service must remain enabled.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Done") {
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+            .padding(20)
+        }
+        .frame(width: 420, height: 520)
+    }
+
+    private func binding(for service: GoogleService) -> Binding<Bool> {
+        Binding(
+            get: { model.enabledServices.contains(service) },
+            set: { model.setService(service, enabled: $0) }
+        )
+    }
+
+    private func disableHelp(for service: GoogleService) -> String {
+        if model.enabledServices.count == 1 && model.enabledServices.contains(service) {
+            return "At least one service must remain enabled"
+        }
+        return service.title
     }
 }
 

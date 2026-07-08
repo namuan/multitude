@@ -41,6 +41,35 @@ enum GoogleService: String, CaseIterable, Codable {
     case calendar
     case drive
     case meet
+    case docs
+    case sheets
+    case slides
+    case keep
+    case photos
+    case maps
+    case youtube
+    case news
+    case gemini
+    case chat
+
+    static let defaultEnabled: [GoogleService] = [.gmail, .calendar, .drive, .meet]
+
+    static let allAvailable: [GoogleService] = [
+        .gmail,
+        .calendar,
+        .drive,
+        .meet,
+        .docs,
+        .sheets,
+        .slides,
+        .keep,
+        .photos,
+        .maps,
+        .youtube,
+        .news,
+        .gemini,
+        .chat
+    ]
 
     var title: String {
         switch self {
@@ -48,6 +77,16 @@ enum GoogleService: String, CaseIterable, Codable {
         case .calendar: return "Calendar"
         case .drive: return "Drive"
         case .meet: return "Meet"
+        case .docs: return "Docs"
+        case .sheets: return "Sheets"
+        case .slides: return "Slides"
+        case .keep: return "Keep"
+        case .photos: return "Photos"
+        case .maps: return "Maps"
+        case .youtube: return "YouTube"
+        case .news: return "News"
+        case .gemini: return "Gemini"
+        case .chat: return "Chat"
         }
     }
 
@@ -57,6 +96,16 @@ enum GoogleService: String, CaseIterable, Codable {
         case .calendar: return "calendar"
         case .drive: return "folder.fill"
         case .meet: return "video.fill"
+        case .docs: return "doc.text.fill"
+        case .sheets: return "tablecells.fill"
+        case .slides: return "rectangle.on.rectangle.angled"
+        case .keep: return "note.text"
+        case .photos: return "photo.fill"
+        case .maps: return "map.fill"
+        case .youtube: return "play.rectangle.fill"
+        case .news: return "newspaper.fill"
+        case .gemini: return "sparkles"
+        case .chat: return "message.fill"
         }
     }
 
@@ -66,6 +115,16 @@ enum GoogleService: String, CaseIterable, Codable {
         case .calendar: return URL(string: "https://calendar.google.com/")!
         case .drive: return URL(string: "https://drive.google.com/")!
         case .meet: return URL(string: "https://meet.google.com/")!
+        case .docs: return URL(string: "https://docs.google.com/document/")!
+        case .sheets: return URL(string: "https://docs.google.com/spreadsheets/")!
+        case .slides: return URL(string: "https://docs.google.com/presentation/")!
+        case .keep: return URL(string: "https://keep.google.com/")!
+        case .photos: return URL(string: "https://photos.google.com/")!
+        case .maps: return URL(string: "https://maps.google.com/")!
+        case .youtube: return URL(string: "https://www.youtube.com/")!
+        case .news: return URL(string: "https://news.google.com/")!
+        case .gemini: return URL(string: "https://gemini.google.com/")!
+        case .chat: return URL(string: "https://chat.google.com/")!
         }
     }
 }

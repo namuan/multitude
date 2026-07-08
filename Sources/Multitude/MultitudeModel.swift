@@ -10,7 +10,7 @@ import AVFoundation
 /// Responsibilities:
 /// - Account CRUD and persistence (via JSON in `Application Support`)
 /// - Room lifecycle: create, keep alive, switch, destroy
-/// - Navigation (Gmail, Calendar, Drive, Meet)
+    /// - Navigation across the user's enabled Google services
 /// - Unread badge polling via JavaScript injection
 /// - macOS Dock badge and native notifications
 /// - `WKNavigationDelegate` and `WKUIDelegate` for all web views
@@ -29,6 +29,7 @@ final class MultitudeModel: NSObject, ObservableObject {
     @Published var currentURL: String = ""
     @Published var pageTitle: String = ""
     @Published var currentService: GoogleService = .gmail
+    @Published var enabledServices: [GoogleService] = GoogleService.defaultEnabled
 
     // MARK: Internal state
 
@@ -59,6 +60,10 @@ final class MultitudeModel: NSObject, ObservableObject {
         log.info("Multitude starting up")
         super.init()
 
+        log.info("Loading enabled services…")
+        loadEnabledServices()
+        log.info("Enabled services loaded: \(enabledServices.map(\.title).joined(separator: ", "))")
+
         log.info("Loading accounts…")
         loadAccounts()
         log.info("Accounts loaded: \(accounts.count)")
@@ -87,13 +92,21 @@ final class MultitudeModel: NSObject, ObservableObject {
 
     // MARK: - Account Persistence
 
-    private static func accountsURL() -> URL? {
+    private static func applicationSupportURL() -> URL? {
         let paths = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
         let dir = paths.first?.appendingPathComponent("Multitude", isDirectory: true)
         if let dir = dir {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
-        return dir?.appendingPathComponent("accounts.json")
+        return dir
+    }
+
+    private static func accountsURL() -> URL? {
+        applicationSupportURL()?.appendingPathComponent("accounts.json")
+    }
+
+    private static func enabledServicesURL() -> URL? {
+        applicationSupportURL()?.appendingPathComponent("enabled_services.json")
     }
 
     private func loadAccounts() {
@@ -122,6 +135,85 @@ final class MultitudeModel: NSObject, ObservableObject {
         FileLogger.shared.debug("Saved \(accounts.count) accounts to \(url.path)")
     }
 
+    // MARK: - Service Persistence
+
+    private func loadEnabledServices() {
+        guard let url = Self.enabledServicesURL() else {
+            FileLogger.shared.error("Failed to locate enabled services URL")
+            enabledServices = GoogleService.defaultEnabled
+            return
+        }
+
+        guard let data = try? Data(contentsOf: url) else {
+            // Migration path: existing users keep seeing the original four services
+            // until they opt into more.
+            enabledServices = GoogleService.defaultEnabled
+            saveEnabledServices()
+            FileLogger.shared.info("No enabled_services.json found; defaulting to original services")
+            return
+        }
+
+        guard let rawValues = try? JSONDecoder().decode([String].self, from: data) else {
+            FileLogger.shared.warning("Could not decode enabled services; falling back to defaults")
+            enabledServices = GoogleService.defaultEnabled
+            saveEnabledServices()
+            return
+        }
+
+        let decoded = sanitizedEnabledServices(from: rawValues.compactMap(GoogleService.init(rawValue:)))
+        enabledServices = decoded
+        if decoded.map(\.rawValue) != rawValues {
+            saveEnabledServices()
+        }
+        FileLogger.shared.debug("Loaded \(enabledServices.count) enabled services from \(url.path)")
+    }
+
+    private func saveEnabledServices() {
+        guard let url = Self.enabledServicesURL(),
+              let data = try? JSONEncoder().encode(enabledServices.map(\.rawValue))
+        else {
+            FileLogger.shared.error("Failed to encode or locate enabled services URL for saving")
+            return
+        }
+        try? data.write(to: url, options: .atomic)
+        FileLogger.shared.debug("Saved enabled services to \(url.path)")
+    }
+
+    private func sanitizedEnabledServices(from services: [GoogleService]) -> [GoogleService] {
+        var seen = Set<GoogleService>()
+        let valid = services.filter { service in
+            GoogleService.allAvailable.contains(service) && seen.insert(service).inserted
+        }
+        return valid.isEmpty ? GoogleService.defaultEnabled : valid
+    }
+
+    func setService(_ service: GoogleService, enabled: Bool) {
+        var services = enabledServices
+        if enabled {
+            guard !services.contains(service) else { return }
+            services.append(service)
+        } else {
+            guard services.count > 1 else { return }
+            services.removeAll { $0 == service }
+        }
+        setEnabledServices(services)
+    }
+
+    func setEnabledServices(_ services: [GoogleService]) {
+        enabledServices = sanitizedEnabledServices(from: services)
+        saveEnabledServices()
+
+        if !enabledServices.contains(currentService), let fallback = enabledServices.first {
+            FileLogger.shared.info("Current service disabled; switching to \(fallback.title)")
+            currentService = fallback
+            loadService(fallback)
+        }
+    }
+
+    var defaultService: GoogleService {
+        enabledServices.first ?? .gmail
+    }
+
     // MARK: - Account CRUD
 
     func addAccount(displayName: String, email: String = "") {
@@ -134,11 +226,11 @@ final class MultitudeModel: NSObject, ObservableObject {
         accounts.append(account)
         saveAccounts()
 
-        // Build its room and load Gmail
+        // Build its room and load the first enabled service
         let wv = WebViewFactory.makeWebView(for: account, uiDelegate: self, navigationDelegate: self)
         rooms[account.id] = wv
-        wv.load(URLRequest(url: GoogleService.gmail.url))
-        FileLogger.shared.info("Room built and Gmail loading for account: \(displayName) (id: \(account.id))")
+        wv.load(URLRequest(url: defaultService.url))
+        FileLogger.shared.info("Room built and \(defaultService.title) loading for account: \(displayName) (id: \(account.id))")
 
         addDebug("Added room '\(displayName)'")
         switchTo(account.id)
@@ -209,8 +301,8 @@ final class MultitudeModel: NSObject, ObservableObject {
                 )
                 self.rooms[id] = newWebView
                 self.addDebug("Room '\(account.displayName)' reset complete")
-                newWebView.load(URLRequest(url: GoogleService.gmail.url))
-                FileLogger.shared.info("Loading Gmail in reset room")
+                newWebView.load(URLRequest(url: self.defaultService.url))
+                FileLogger.shared.info("Loading \(self.defaultService.title) in reset room")
 
                 if self.activeAccountId == id {
                     self.objectWillChange.send()
@@ -276,10 +368,11 @@ final class MultitudeModel: NSObject, ObservableObject {
         activeAccountId = id
         // Restore the last active service for this room
         if let account = accounts.first(where: { $0.id == id }) {
-            currentService = account.lastService
-            FileLogger.shared.debug("Restored lastService=\(account.lastService.title) for \(name)")
+            let service = enabledServices.contains(account.lastService) ? account.lastService : defaultService
+            currentService = service
+            FileLogger.shared.debug("Restored service=\(service.title) for \(name)")
             // Navigate the web view to that service
-            loadService(account.lastService)
+            loadService(service)
         } else {
             FileLogger.shared.warning("No account found for id \(id) during switchTo")
         }
