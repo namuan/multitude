@@ -75,8 +75,6 @@ final class MultitudeModel: NSObject, ObservableObject {
         if let first = accounts.first {
             log.info("Switching to first account: \(first.displayName) (lastService: \(first.lastService.title))")
             switchTo(first.id)
-            log.info("Loading last service: \(first.lastService.title)")
-            loadService(first.lastService)
         } else {
             log.warning("No accounts found on startup")
         }
@@ -276,6 +274,8 @@ final class MultitudeModel: NSObject, ObservableObject {
         if let account = accounts.first(where: { $0.id == id }) {
             currentService = account.lastService
             FileLogger.shared.debug("Restored lastService=\(account.lastService.title) for \(name)")
+            // Navigate the web view to that service
+            loadService(account.lastService)
         } else {
             FileLogger.shared.warning("No account found for id \(id) during switchTo")
         }
