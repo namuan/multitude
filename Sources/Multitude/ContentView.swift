@@ -14,6 +14,11 @@ struct ContentView: View {
 
             // ── Main content ──
             VStack(spacing: 0) {
+                // Service pill tabs
+                ServicePillBar(model: model)
+
+                Divider()
+
                 // Web view area
                 WebViewContainer(webView: model.activeWebView)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

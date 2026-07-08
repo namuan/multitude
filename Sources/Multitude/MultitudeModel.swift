@@ -61,6 +61,7 @@ final class MultitudeModel: NSObject, ObservableObject {
 
         if let first = accounts.first {
             switchTo(first.id)
+            loadService(first.lastService)
         }
     }
 
@@ -213,6 +214,10 @@ final class MultitudeModel: NSObject, ObservableObject {
     func switchTo(_ id: UUID?) {
         guard let id = id, rooms[id] != nil else { return }
         activeAccountId = id
+        // Restore the last active service for this room
+        if let account = accounts.first(where: { $0.id == id }) {
+            currentService = account.lastService
+        }
         syncActiveState()
         addDebug("Switched to \(displayName(for: id))")
 
