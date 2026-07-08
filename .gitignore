@@ -1,0 +1,25 @@
+# Swift Package Manager
+.build/
+Package.resolved
+
+# macOS app bundles
+*.app
+*.dSYM.zip
+*.dSYM
+
+# Xcode
+*.xcworkspace
+*.xcuserdata
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/
+DerivedData/
+
+# macOS
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
