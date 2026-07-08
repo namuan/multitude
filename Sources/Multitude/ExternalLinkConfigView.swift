@@ -23,6 +23,9 @@ struct ExternalLinkConfigView: View {
             .padding([.top, .horizontal], 20)
             .padding(.bottom, 12)
 
+            // Browser picker
+            browserPickerSection
+
             if model.externalLinkRules.isEmpty {
                 emptyState
             } else {
@@ -54,6 +57,38 @@ struct ExternalLinkConfigView: View {
         }
         .sheet(item: $editingRule) { rule in
             EditExternalLinkRuleView(model: model, rule: rule)
+        }
+    }
+
+    // MARK: - Browser Picker
+
+    private var browserPickerSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Divider()
+                .padding(.horizontal, 0)
+
+            HStack(spacing: 8) {
+                Text("Open links in:")
+                    .font(.subheadline.weight(.medium))
+
+                Picker("Browser", selection: $model.selectedBrowserBundleID) {
+                    Text("System Default").tag(nil as String?)
+                    ForEach(model.installedBrowsers) { browser in
+                        Text(browser.displayName).tag(browser.id as String?)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 6)
+
+            Text("When a rule has its own browser set, that browser is used instead of this global preference.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 20)
         }
     }
 
@@ -181,6 +216,20 @@ private struct RuleRowView: View {
                         .fill(Color(.separatorColor).opacity(0.15))
                 )
 
+            // Browser badge
+            if let browserID = rule.browserBundleID,
+               let browser = model.installedBrowsers.first(where: { $0.id == browserID }) {
+                Text(browser.displayName)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .stroke(Color(.separatorColor).opacity(0.3), lineWidth: 0.5)
+                    )
+            }
+
             Menu {
                 Button("Edit…") { onEdit() }
                 Button("Delete", role: .destructive) {
@@ -198,6 +247,27 @@ private struct RuleRowView: View {
     }
 }
 
+// MARK: - Browser Picker Helper
+
+/// Shared browser picker used in both the Add and Edit rule sheets.
+private struct BrowserPicker: View {
+    @Binding var selectedBrowserBundleID: String?
+    let installedBrowsers: [InstalledBrowser]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Open with").font(.caption).foregroundColor(.secondary)
+            Picker("Open with", selection: $selectedBrowserBundleID) {
+                Text("System Default").tag(nil as String?)
+                ForEach(installedBrowsers) { browser in
+                    Text(browser.displayName).tag(browser.id as String?)
+                }
+            }
+            .labelsHidden()
+        }
+    }
+}
+
 // MARK: - Add Rule Sheet
 
 private struct AddExternalLinkRuleView: View {
@@ -206,6 +276,7 @@ private struct AddExternalLinkRuleView: View {
 
     @State private var domain = ""
     @State private var action: LinkAction = .alwaysOpen
+    @State private var selectedBrowserBundleID: String? = nil
     @State private var validationError: String?
 
     var body: some View {
@@ -217,7 +288,7 @@ private struct AddExternalLinkRuleView: View {
             Text("Add External Link Rule")
                 .font(.title2.bold())
 
-            Text("Links to this domain will open in your default browser without prompting.")
+            Text("Links to this domain will open without prompting, using the chosen browser.")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -245,6 +316,8 @@ private struct AddExternalLinkRuleView: View {
                 .pickerStyle(.radioGroup)
             }
 
+            BrowserPicker(selectedBrowserBundleID: $selectedBrowserBundleID, installedBrowsers: model.installedBrowsers)
+
             HStack {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.escape)
@@ -267,7 +340,7 @@ private struct AddExternalLinkRuleView: View {
                         validationError = "A rule for '\(trimmed)' already exists."
                         return
                     }
-                    model.addExternalLinkRule(domain: trimmed, action: action)
+                    model.addExternalLinkRule(domain: trimmed, action: action, browserBundleID: selectedBrowserBundleID)
                     dismiss()
                 }
                 .keyboardShortcut(.return)
@@ -288,6 +361,7 @@ private struct EditExternalLinkRuleView: View {
 
     @State private var domain: String
     @State private var action: LinkAction
+    @State private var selectedBrowserBundleID: String?
     @State private var validationError: String?
 
     init(model: MultitudeModel, rule: ExternalLinkRule) {
@@ -295,6 +369,7 @@ private struct EditExternalLinkRuleView: View {
         self.rule = rule
         _domain = State(initialValue: rule.domain)
         _action = State(initialValue: rule.action)
+        _selectedBrowserBundleID = State(initialValue: rule.browserBundleID)
     }
 
     var body: some View {
@@ -329,6 +404,8 @@ private struct EditExternalLinkRuleView: View {
                 .pickerStyle(.radioGroup)
             }
 
+            BrowserPicker(selectedBrowserBundleID: $selectedBrowserBundleID, installedBrowsers: model.installedBrowsers)
+
             HStack {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.escape)
@@ -360,7 +437,7 @@ private struct EditExternalLinkRuleView: View {
                         validationError = "Another rule for '\(trimmed)' already exists."
                         return
                     }
-                    model.updateExternalLinkRule(rule.id, domain: trimmed, action: action)
+                    model.updateExternalLinkRule(rule.id, domain: trimmed, action: action, browserBundleID: selectedBrowserBundleID)
                     dismiss()
                 }
                 .keyboardShortcut(.return)

@@ -70,6 +70,11 @@ final class MultitudeModel: NSObject, ObservableObject {
         loadExternalLinkRules()
         log.info("External link rules loaded: \(externalLinkRules.count)")
 
+        log.info("Detecting installed browsers…")
+        installedBrowsers = Self.detectInstalledBrowsers()
+        loadBrowserPreference()
+        log.info("Browsers detected: \(installedBrowsers.map(\.displayName).joined(separator: ", ")), selected: \(selectedBrowserBundleID ?? "system default")")
+
         log.info("Loading accounts…")
         loadAccounts()
         log.info("Accounts loaded: \(accounts.count)")
@@ -117,6 +122,10 @@ final class MultitudeModel: NSObject, ObservableObject {
 
     private static func externalLinkRulesURL() -> URL? {
         applicationSupportURL()?.appendingPathComponent("external_link_rules.json")
+    }
+
+    private static func browserPreferenceURL() -> URL? {
+        applicationSupportURL()?.appendingPathComponent("browser_preference.json")
     }
 
     private func loadAccounts() {
@@ -226,6 +235,47 @@ final class MultitudeModel: NSObject, ObservableObject {
 
     // MARK: - External Link Rules
 
+    /// Known browser bundle IDs with user-friendly names.
+    private static let knownBrowserNames: [String: String] = [
+        "com.apple.Safari": "Safari",
+        "com.google.Chrome": "Chrome",
+        "org.mozilla.firefox": "Firefox",
+        "com.microsoft.edgemac": "Edge",
+        "com.brave.Browser": "Brave",
+        "com.operasoftware.Opera": "Opera",
+        "company.thebrowser.Browser": "Arc",
+        "com.vivaldi.Vivaldi": "Vivaldi",
+        "com.kagi.kagimacOS": "Orion",
+        "org.mozilla.torbrowser": "Tor Browser",
+    ]
+
+    /// Detects which known browsers are installed on the system.
+    /// Returns an alphabetically sorted list with Safari first if present.
+    static func detectInstalledBrowsers() -> [InstalledBrowser] {
+        let knownIDs = Array(knownBrowserNames.keys)
+        let detected: [InstalledBrowser] = knownIDs.compactMap { bundleID in
+            guard let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+                return nil
+            }
+            let name = knownBrowserNames[bundleID] ?? FileManager.default.displayName(atPath: appURL.path)
+            return InstalledBrowser(id: bundleID, displayName: name, appURL: appURL)
+        }
+
+        // Safari first, then alphabetical
+        return detected.sorted { a, b in
+            if a.id == "com.apple.Safari" { return true }
+            if b.id == "com.apple.Safari" { return false }
+            return a.displayName.localizedCompare(b.displayName) == .orderedAscending
+        }
+    }
+
+    /// Browsers detected on the current system.
+    @Published var installedBrowsers: [InstalledBrowser] = []
+    /// The user's preferred browser. `nil` means use the system default.
+    @Published var selectedBrowserBundleID: String? {
+        didSet { saveBrowserPreference() }
+    }
+
     static let defaultExternalLinkSuggestions: [ExternalLinkRule] = [
         ExternalLinkRule(domain: "zoom.us"),
         ExternalLinkRule(domain: "slack.com"),
@@ -258,7 +308,7 @@ final class MultitudeModel: NSObject, ObservableObject {
         FileLogger.shared.debug("Saved \(externalLinkRules.count) external link rules to \(url.path)")
     }
 
-    func addExternalLinkRule(domain: String, action: LinkAction = .alwaysOpen) {
+    func addExternalLinkRule(domain: String, action: LinkAction = .alwaysOpen, browserBundleID: String? = nil) {
         let trimmed = domain.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !trimmed.isEmpty else { return }
         guard !externalLinkRules.contains(where: { $0.domain == trimmed }) else {
@@ -266,11 +316,14 @@ final class MultitudeModel: NSObject, ObservableObject {
             return
         }
 
-        let rule = ExternalLinkRule(domain: trimmed, action: action)
+        let rule = ExternalLinkRule(domain: trimmed, action: action, browserBundleID: browserBundleID)
         externalLinkRules.append(rule)
         saveExternalLinkRules()
-        addDebug("Added external link rule: \(trimmed) (\(action.label))")
-        FileLogger.shared.info("External link rule added: domain=\(trimmed) action=\(action.rawValue)")
+        let browserLabel = browserBundleID.flatMap { id in
+            installedBrowsers.first(where: { $0.id == id })?.displayName
+        } ?? "default"
+        addDebug("Added external link rule: \(trimmed) (\(action.label), browser: \(browserLabel))")
+        FileLogger.shared.info("External link rule added: domain=\(trimmed) action=\(action.rawValue) browser=\(browserBundleID ?? "default")")
     }
 
     func removeExternalLinkRule(_ id: UUID) {
@@ -284,7 +337,7 @@ final class MultitudeModel: NSObject, ObservableObject {
         FileLogger.shared.info("External link rule removed: domain=\(rule.domain)")
     }
 
-    func updateExternalLinkRule(_ id: UUID, domain: String, action: LinkAction) {
+    func updateExternalLinkRule(_ id: UUID, domain: String, action: LinkAction, browserBundleID: String? = nil) {
         guard let idx = externalLinkRules.firstIndex(where: { $0.id == id }) else {
             FileLogger.shared.warning("updateExternalLinkRule called for unknown id: \(id)")
             return
@@ -292,8 +345,44 @@ final class MultitudeModel: NSObject, ObservableObject {
         let oldDomain = externalLinkRules[idx].domain
         externalLinkRules[idx].domain = domain.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         externalLinkRules[idx].action = action
+        externalLinkRules[idx].browserBundleID = browserBundleID
         saveExternalLinkRules()
-        FileLogger.shared.info("External link rule updated: '\(oldDomain)' → '\(domain)' action=\(action.rawValue)")
+        FileLogger.shared.info("External link rule updated: '\(oldDomain)' → '\(domain)' action=\(action.rawValue) browser=\(browserBundleID ?? "default")")
+    }
+
+    // MARK: - Browser Preference
+
+    private func loadBrowserPreference() {
+        guard let url = Self.browserPreferenceURL(),
+              let data = try? Data(contentsOf: url),
+              let bundleID = try? JSONDecoder().decode(String.self, from: data)
+        else {
+            selectedBrowserBundleID = nil
+            return
+        }
+        // Only restore the preference if the browser is still installed.
+        if NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) != nil {
+            selectedBrowserBundleID = bundleID
+            FileLogger.shared.debug("Loaded browser preference: \(bundleID)")
+        } else {
+            selectedBrowserBundleID = nil
+            FileLogger.shared.debug("Saved browser '\(bundleID)' is no longer installed, reverting to system default")
+        }
+    }
+
+    private func saveBrowserPreference() {
+        guard let url = Self.browserPreferenceURL() else {
+            FileLogger.shared.error("Failed to locate browser preference URL")
+            return
+        }
+        if let bundleID = selectedBrowserBundleID {
+            try? JSONEncoder().encode(bundleID).write(to: url, options: .atomic)
+            FileLogger.shared.debug("Saved browser preference: \(bundleID)")
+        } else {
+            // Remove the file so the next launch sees no preference.
+            try? FileManager.default.removeItem(at: url)
+            FileLogger.shared.debug("Cleared browser preference (system default)")
+        }
     }
 
     /// Returns the first rule whose domain matches the URL host (suffix match).
@@ -305,29 +394,66 @@ final class MultitudeModel: NSObject, ObservableObject {
         }
     }
 
-    /// Opens a URL in the default system browser.
-    private func openInDefaultBrowser(url: URL) {
-        FileLogger.shared.info("Opening externally: \(url.absoluteString)")
-        addDebug("Opened externally: \(url.absoluteString)")
-        NSWorkspace.shared.open(url)
+    /// Opens a URL in the specified browser, or the global preference / system default if `nil`.
+    private func openInDefaultBrowser(url: URL, browserBundleID: String? = nil) {
+        let bundleID = browserBundleID ?? selectedBrowserBundleID
+        if let bundleID = bundleID,
+           let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            let config = NSWorkspace.OpenConfiguration()
+            config.promptsUserIfNeeded = false
+            NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: config)
+            FileLogger.shared.info("Opening in \(bundleID): \(url.absoluteString)")
+            addDebug("Opened in \(bundleID): \(url.absoluteString)")
+        } else {
+            FileLogger.shared.info("Opening in system default browser: \(url.absoluteString)")
+            addDebug("Opened externally: \(url.absoluteString)")
+            NSWorkspace.shared.open(url)
+        }
     }
 
-    /// Shows a confirmation alert for an `ask`-action rule.
-    /// Returns the user's choice.
-    private func askToOpenExternally(url: URL, domain: String) -> AskExternalLinkResult {
+    /// Shows a confirmation alert with a browser picker.
+    /// Returns the user's choice and the selected browser bundle ID.
+    private func askToOpenExternally(url: URL, domain: String) -> (result: AskExternalLinkResult, browserBundleID: String?) {
         let alert = NSAlert()
-        alert.messageText = "Open \(domain) in your default browser?"
+        alert.messageText = "Open \(domain)?"
         alert.informativeText = url.absoluteString
         alert.addButton(withTitle: "Open Once")
         alert.addButton(withTitle: "Always Open")
         alert.addButton(withTitle: "Cancel")
-        switch alert.runModal() {
+        // Set the cancel button as the default (Escape key)
+        alert.buttons.last?.keyEquivalent = "\u{1b}"
+
+        // Browser picker accessory
+        let popUp = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 220, height: 22))
+        popUp.addItem(withTitle: "System Default")
+        for browser in installedBrowsers {
+            popUp.addItem(withTitle: browser.displayName)
+        }
+
+        let label = NSTextField(labelWithString: "Open with:")
+        label.font = NSFont.systemFont(ofSize: NSFont.systemFontSize(for: .small))
+        label.isBezeled = false
+        label.drawsBackground = false
+        label.isEditable = false
+
+        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 340, height: 22))
+        stack.orientation = .horizontal
+        stack.spacing = 8
+        stack.addArrangedSubview(label)
+        stack.addArrangedSubview(popUp)
+        alert.accessoryView = stack
+
+        let response = alert.runModal()
+        let selectedIndex = popUp.indexOfSelectedItem
+        let browserBundleID: String? = selectedIndex > 0 ? installedBrowsers[selectedIndex - 1].id : nil
+
+        switch response {
         case .alertFirstButtonReturn:
-            return .openOnce
+            return (.openOnce, browserBundleID)
         case .alertSecondButtonReturn:
-            return .alwaysOpen
+            return (.alwaysOpen, browserBundleID)
         default:
-            return .cancel
+            return (.cancel, nil)
         }
     }
 
@@ -871,11 +997,12 @@ extension MultitudeModel: WKNavigationDelegate {
         // Check for a matching rule.
         let existingRule = matchingRule(for: url)
 
-        // If the domain is already saved as alwaysOpen — open silently.
+        // If the domain is already saved as alwaysOpen — open silently
+        // using the browser saved in the rule.
         if let rule = existingRule, rule.action == .alwaysOpen {
             FileLogger.shared.info("Nav POLICY external rule '\(rule.domain)' matched (alwaysOpen): \(urlStr) [\(room)]")
             addDebug("[\(room)] External link rule '\(rule.domain)' matched: \(urlStr)")
-            openInDefaultBrowser(url: url)
+            openInDefaultBrowser(url: url, browserBundleID: rule.browserBundleID)
             decisionHandler(.cancel, preferences)
             return
         }
@@ -885,10 +1012,10 @@ extension MultitudeModel: WKNavigationDelegate {
         FileLogger.shared.info("Nav POLICY prompting for domain: \(domain) [\(room)] url: \(urlStr)")
         addDebug("[\(room)] Prompting to open externally: \(urlStr)")
 
-        let result = askToOpenExternally(url: url, domain: domain)
+        let (result, chosenBrowser) = askToOpenExternally(url: url, domain: domain)
         switch result {
         case .openOnce:
-            openInDefaultBrowser(url: url)
+            openInDefaultBrowser(url: url, browserBundleID: chosenBrowser)
             decisionHandler(.cancel, preferences)
 
         case .alwaysOpen:
@@ -896,14 +1023,15 @@ extension MultitudeModel: WKNavigationDelegate {
             if let rule = existingRule {
                 if let idx = externalLinkRules.firstIndex(where: { $0.id == rule.id }) {
                     externalLinkRules[idx].action = .alwaysOpen
+                    externalLinkRules[idx].browserBundleID = chosenBrowser
                     saveExternalLinkRules()
-                    addDebug("Rule '\(rule.domain)' upgraded to always open")
-                    FileLogger.shared.info("External link rule '\(rule.domain)' upgraded to alwaysOpen")
+                    addDebug("Rule '\(rule.domain)' upgraded to always open (browser: \(chosenBrowser ?? "default"))")
+                    FileLogger.shared.info("External link rule '\(rule.domain)' upgraded to alwaysOpen, browser=\(chosenBrowser ?? "default")")
                 }
             } else {
-                addExternalLinkRule(domain: domain, action: .alwaysOpen)
+                addExternalLinkRule(domain: domain, action: .alwaysOpen, browserBundleID: chosenBrowser)
             }
-            openInDefaultBrowser(url: url)
+            openInDefaultBrowser(url: url, browserBundleID: chosenBrowser)
             decisionHandler(.cancel, preferences)
 
         case .cancel:

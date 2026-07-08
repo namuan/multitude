@@ -13,12 +13,26 @@ struct ExternalLinkRule: Identifiable, Codable, Equatable {
     var domain: String
     /// Whether to open silently or ask for confirmation.
     var action: LinkAction
+    /// Bundle identifier of the preferred browser for this domain.
+    /// `nil` means use the global preference or system default.
+    var browserBundleID: String?
 
-    init(id: UUID = UUID(), domain: String, action: LinkAction = .alwaysOpen) {
+    init(id: UUID = UUID(), domain: String, action: LinkAction = .alwaysOpen, browserBundleID: String? = nil) {
         self.id = id
         self.domain = domain
         self.action = action
+        self.browserBundleID = browserBundleID
     }
+}
+
+/// A browser installed on the system that can open web links.
+struct InstalledBrowser: Identifiable, Equatable {
+    /// Bundle identifier (e.g. "com.google.Chrome").
+    let id: String
+    /// User-visible name (e.g. "Chrome").
+    let displayName: String
+    /// URL to the .app bundle on disk.
+    let appURL: URL
 }
 
 /// Result from the external link confirmation alert.
