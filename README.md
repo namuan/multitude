@@ -2,6 +2,8 @@
 
 A macOS desktop app that lets you run multiple Google accounts side-by-side — each in its own fully isolated browser session. Switch between Gmail, Calendar, Drive, and Meet with a click.
 
+![](assets/intro.jpg)
+
 ## Features
 
 - **Multi‑account rooms** — Sign into a different Google account in each room. Cookies, localStorage, and IndexedDB never leak between them.
