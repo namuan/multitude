@@ -13,53 +13,24 @@ struct MultitudeApp: App {
         .windowStyle(.titleBar)
         .windowResizability(.contentSize)
         .commands {
-            // ── Rooms menu with dynamic ⌘1-⌘9 shortcuts ──
-            CommandMenu("Rooms") {
-                ForEach(Array(model.accounts.prefix(9).enumerated()), id: \.element.id) { i, account in
-                    Button {
-                        model.switchTo(account.id)
-                    } label: {
-                        HStack {
-                            Text(account.displayName)
-                            if model.unreadBadges[account.id] ?? 0 > 0 {
-                                Text("(\(model.unreadBadges[account.id] ?? 0))")
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
-                    .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command])
-                }
-
-                Divider()
-
-                Button("Add Room…") {
-                    model.showingAddAccount = true
-                }
-                .keyboardShortcut("n", modifiers: [.command, .shift])
-
-                Button("Reset Active Room") {
-                    if let id = model.activeAccountId {
-                        model.resetAccount(id)
-                    }
-                }
-                .keyboardShortcut("r", modifiers: [.command, .option, .shift])
-                .disabled(model.activeAccountId == nil)
-
-                Button("Delete Active Room") {
-                    if let id = model.activeAccountId {
-                        model.removeAccount(id)
-                    }
-                }
-                .keyboardShortcut(.delete, modifiers: [.command, .shift])
-                .disabled(model.activeAccountId == nil)
-            }
-
             // ── View menu ──
             CommandMenu("View") {
                 Button("Toggle Debug Panel") {
                     model.showingDebugPanel.toggle()
                 }
                 .keyboardShortcut("d", modifiers: [.command, .option])
+
+                Divider()
+
+                // Room-switching shortcuts (⌘1-⌘9)
+                ForEach(Array(model.accounts.prefix(9).enumerated()), id: \.element.id) { i, account in
+                    Button {
+                        model.switchTo(account.id)
+                    } label: {
+                        Text(account.displayName)
+                    }
+                    .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command])
+                }
             }
         }
     }
