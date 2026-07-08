@@ -106,3 +106,7 @@ Tail live:
 tail -f ~/Library/Logs/Multitude/multitude-$(date +%F).log
 ```
 
+## License
+
+[MIT](LICENSE)
+
