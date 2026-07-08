@@ -54,25 +54,6 @@ struct MultitudeApp: App {
                 .disabled(model.activeAccountId == nil)
             }
 
-            // ── Go menu ──
-            CommandMenu("Go") {
-                Button("Gmail") { model.loadService(.gmail) }
-                    .keyboardShortcut("1", modifiers: [.command, .shift])
-                Button("Calendar") { model.loadService(.calendar) }
-                    .keyboardShortcut("2", modifiers: [.command, .shift])
-                Button("Drive") { model.loadService(.drive) }
-                    .keyboardShortcut("3", modifiers: [.command, .shift])
-                Button("Meet") { model.loadService(.meet) }
-                    .keyboardShortcut("4", modifiers: [.command, .shift])
-                Divider()
-                Button("Reload") { model.reload() }
-                    .keyboardShortcut("r", modifiers: [.command])
-                Button("Back") { model.goBack() }
-                    .keyboardShortcut("[", modifiers: [.command])
-                Button("Forward") { model.goForward() }
-                    .keyboardShortcut("]", modifiers: [.command])
-            }
-
             // ── View menu ──
             CommandMenu("View") {
                 Button("Toggle Debug Panel") {
