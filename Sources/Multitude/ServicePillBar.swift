@@ -69,6 +69,14 @@ struct ServicePillBar: View {
 
     private func pill(for service: GoogleService) -> some View {
         let isActive = model.currentService == service
+        let unread = service == .gmail ? model.unreadBadges[model.activeAccountId ?? UUID()] ?? 0 : 0
+        let activeId = model.activeAccountId?.uuidString ?? "nil"
+        let badgeCount = model.unreadBadges.count
+
+        // Log every render of the Gmail pill with its unread state
+        if service == .gmail {
+            FileLogger.shared.debug("pill(for: gmail) activeId=\(activeId) unread=\(unread) badgeDictSize=\(badgeCount)")
+        }
 
         return Button {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) {
@@ -80,6 +88,16 @@ struct ServicePillBar: View {
                     .font(.system(size: 11, weight: .semibold))
                 Text(service.title)
                     .font(.system(size: 12, weight: isActive ? .semibold : .medium))
+
+                if unread > 0 {
+                    Text("\(unread)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.red)
+                        .clipShape(Capsule())
+                }
             }
             .foregroundColor(isActive ? .white : .primary)
             .padding(.horizontal, 12)
@@ -97,7 +115,7 @@ struct ServicePillBar: View {
             )
         }
         .buttonStyle(.plain)
-        .help(service.title)
+        .help(unread > 0 ? "\(service.title) — \(unread) unread" : service.title)
     }
 }
 

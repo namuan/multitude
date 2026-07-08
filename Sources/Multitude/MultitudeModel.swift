@@ -53,16 +53,34 @@ final class MultitudeModel: NSObject, ObservableObject {
     // MARK: - Initialization
 
     override init() {
+        let log = FileLogger.shared
+        log.info("═══════════════════════════════════════════")
+        log.info("Multitude starting up")
         super.init()
+
+        log.info("Loading accounts…")
         loadAccounts()
+        log.info("Accounts loaded: \(accounts.count)")
+
+        log.info("Building rooms…")
         buildRooms()
+        log.info("Rooms built: \(rooms.count)")
+
+        log.info("Starting badge timer…")
         startBadgeTimer()
+
+        log.info("Requesting notification permission…")
         requestNotificationPermission()
 
         if let first = accounts.first {
+            log.info("Switching to first account: \(first.displayName) (lastService: \(first.lastService.title))")
             switchTo(first.id)
+            log.info("Loading last service: \(first.lastService.title)")
             loadService(first.lastService)
+        } else {
+            log.warning("No accounts found on startup")
         }
+        log.info("═══════════════════════════════════════════ Startup complete")
     }
 
     // MARK: - Account Persistence
@@ -82,23 +100,30 @@ final class MultitudeModel: NSObject, ObservableObject {
               let decoded = try? JSONDecoder().decode([MultitudeAccount].self, from: data)
         else {
             // First launch — create a starter account
+            FileLogger.shared.info("No saved accounts found, creating starter 'Work' account")
             accounts = [MultitudeAccount(displayName: "Work", order: 0)]
             saveAccounts()
             return
         }
         accounts = decoded.sorted { $0.order < $1.order }
+        FileLogger.shared.debug("Loaded \(accounts.count) accounts from \(url.path)")
     }
 
     private func saveAccounts() {
         guard let url = Self.accountsURL(),
               let data = try? JSONEncoder().encode(accounts)
-        else { return }
+        else {
+            FileLogger.shared.error("Failed to encode or locate accounts URL for saving")
+            return
+        }
         try? data.write(to: url, options: .atomic)
+        FileLogger.shared.debug("Saved \(accounts.count) accounts to \(url.path)")
     }
 
     // MARK: - Account CRUD
 
     func addAccount(displayName: String, email: String = "") {
+        FileLogger.shared.info("addAccount called — displayName: \(displayName), email: \(email)")
         let account = MultitudeAccount(
             displayName: displayName,
             email: email,
@@ -111,14 +136,19 @@ final class MultitudeModel: NSObject, ObservableObject {
         let wv = WebViewFactory.makeWebView(for: account, uiDelegate: self, navigationDelegate: self)
         rooms[account.id] = wv
         wv.load(URLRequest(url: GoogleService.gmail.url))
+        FileLogger.shared.info("Room built and Gmail loading for account: \(displayName) (id: \(account.id))")
 
         addDebug("Added room '\(displayName)'")
         switchTo(account.id)
     }
 
     func removeAccount(_ id: UUID) {
-        guard let idx = accounts.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = accounts.firstIndex(where: { $0.id == id }) else {
+            FileLogger.shared.warning("removeAccount called for unknown id: \(id)")
+            return
+        }
         let account = accounts[idx]
+        FileLogger.shared.info("Removing account: \(account.displayName) (id: \(id))")
 
         accounts.remove(at: idx)
         saveAccounts()
@@ -129,12 +159,16 @@ final class MultitudeModel: NSObject, ObservableObject {
         lastKnownBadges.removeValue(forKey: id)
 
         // Wipe the persistent data store from disk.
-        clearWebsiteData(for: account) { }
+        clearWebsiteData(for: account) {
+            FileLogger.shared.info("Website data cleared for: \(account.displayName)")
+        }
 
         addDebug("Removed room '\(account.displayName)'")
 
         // Switch to the nearest remaining account
         if activeAccountId == id {
+            let nextId = accounts.first?.id
+            FileLogger.shared.info("Active account was removed, switching to: \(nextId?.uuidString ?? "nil")")
             switchTo(accounts.first?.id)
         }
     }
@@ -146,7 +180,11 @@ final class MultitudeModel: NSObject, ObservableObject {
     /// wedged, or the user wants to fully sign out/recover one room without
     /// touching any other account.
     func resetAccount(_ id: UUID) {
-        guard let account = accounts.first(where: { $0.id == id }) else { return }
+        guard let account = accounts.first(where: { $0.id == id }) else {
+            FileLogger.shared.warning("resetAccount called for unknown id: \(id)")
+            return
+        }
+        FileLogger.shared.info("Resetting room: \(account.displayName) (id: \(id))")
         addDebug("Resetting room '\(account.displayName)'…")
 
         if let oldWebView = rooms[id] {
@@ -161,6 +199,7 @@ final class MultitudeModel: NSObject, ObservableObject {
         clearWebsiteData(for: account) { [weak self] in
             Task { @MainActor in
                 guard let self = self else { return }
+                FileLogger.shared.info("Website data cleared for reset, rebuilding room")
                 let newWebView = WebViewFactory.makeWebView(
                     for: account,
                     uiDelegate: self,
@@ -169,6 +208,7 @@ final class MultitudeModel: NSObject, ObservableObject {
                 self.rooms[id] = newWebView
                 self.addDebug("Room '\(account.displayName)' reset complete")
                 newWebView.load(URLRequest(url: GoogleService.gmail.url))
+                FileLogger.shared.info("Loading Gmail in reset room")
 
                 if self.activeAccountId == id {
                     self.objectWillChange.send()
@@ -183,6 +223,7 @@ final class MultitudeModel: NSObject, ObservableObject {
         let store = WKWebsiteDataStore(forIdentifier: account.storeIdentifier)
         let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
         store.fetchDataRecords(ofTypes: dataTypes) { records in
+            FileLogger.shared.debug("Clearing \(records.count) data records for store: \(account.storeIdentifier)")
             store.removeData(ofTypes: dataTypes, for: records) {
                 completion()
             }
@@ -190,18 +231,28 @@ final class MultitudeModel: NSObject, ObservableObject {
     }
 
     func renameAccount(_ id: UUID, to name: String) {
-        guard let idx = accounts.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = accounts.firstIndex(where: { $0.id == id }) else {
+            FileLogger.shared.warning("renameAccount called for unknown id: \(id)")
+            return
+        }
+        let oldName = accounts[idx].displayName
         accounts[idx].displayName = name
         saveAccounts()
+        FileLogger.shared.info("Renamed account '\(oldName)' → '\(name)' (id: \(id))")
     }
 
     func setEmail(_ id: UUID, email: String) {
-        guard let idx = accounts.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = accounts.firstIndex(where: { $0.id == id }) else {
+            FileLogger.shared.warning("setEmail called for unknown id: \(id)")
+            return
+        }
         accounts[idx].email = email
         saveAccounts()
+        FileLogger.shared.debug("Set email for account \(id) to: \(email)")
     }
 
     func reorderAccounts(from source: IndexSet, to destination: Int) {
+        FileLogger.shared.debug("Reordering accounts: source=\(source), destination=\(destination)")
         accounts.move(fromOffsets: source, toOffset: destination)
         for (i, _) in accounts.enumerated() {
             accounts[i].order = i
@@ -212,25 +263,46 @@ final class MultitudeModel: NSObject, ObservableObject {
     // MARK: - Room Switching
 
     func switchTo(_ id: UUID?) {
-        guard let id = id, rooms[id] != nil else { return }
+        guard let id = id, rooms[id] != nil else {
+            FileLogger.shared.warning("switchTo called with id=\(id?.uuidString ?? "nil") but no matching room")
+            return
+        }
+        let name = displayName(for: id)
+        let prevId = activeAccountId
+        FileLogger.shared.info("switchTo: \(name) (id: \(id)), previous active=\(prevId?.uuidString ?? "nil")")
+
         activeAccountId = id
         // Restore the last active service for this room
         if let account = accounts.first(where: { $0.id == id }) {
             currentService = account.lastService
+            FileLogger.shared.debug("Restored lastService=\(account.lastService.title) for \(name)")
+        } else {
+            FileLogger.shared.warning("No account found for id \(id) during switchTo")
         }
         syncActiveState()
         addDebug("Switched to \(displayName(for: id))")
+
+        let roomCount = rooms.count
+        let badgeCount = unreadBadges.count
+        FileLogger.shared.debug("Room state: rooms=\(roomCount), badges=\(badgeCount), activeId=\(activeAccountId?.uuidString ?? "nil")")
 
         // Focus the web view so keyboard input works immediately
         if let wv = rooms[id] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 wv.becomeFirstResponder()
             }
+            // Check unread immediately — page may already be loaded
+            FileLogger.shared.debug("Triggering unread check after switch for \(name)")
+            checkUnread(for: wv, accountId: id)
         }
     }
 
     func switchToIndex(_ index: Int) {
-        guard index >= 0, index < accounts.count else { return }
+        guard index >= 0, index < accounts.count else {
+            FileLogger.shared.warning("switchToIndex called with out-of-range index: \(index) (accounts: \(accounts.count))")
+            return
+        }
+        FileLogger.shared.debug("switchToIndex: \(index) → \(accounts[index].displayName)")
         switchTo(accounts[index].id)
     }
 
@@ -242,10 +314,12 @@ final class MultitudeModel: NSObject, ObservableObject {
         guard let id = activeAccountId, let wv = rooms[id] else {
             currentURL = ""
             pageTitle = ""
+            FileLogger.shared.debug("syncActiveState: no active account or web view")
             return
         }
         currentURL = wv.url?.absoluteString ?? ""
         pageTitle = wv.title ?? ""
+        FileLogger.shared.debug("syncActiveState: url='\(currentURL)', title='\(pageTitle)'")
     }
 
     // MARK: - Room Lifecycle
@@ -255,10 +329,13 @@ final class MultitudeModel: NSObject, ObservableObject {
         addDebug("UA mode: full Safari compatibility override")
         addDebug("UA: \(WebViewFactory.safariCompatibilityUserAgent())")
 
+        FileLogger.shared.info("buildRooms: creating \(accounts.count) rooms")
         for account in accounts {
+            FileLogger.shared.debug("  Creating room for: \(account.displayName) (id: \(account.id))")
             let wv = WebViewFactory.makeWebView(for: account, uiDelegate: self, navigationDelegate: self)
             rooms[account.id] = wv
         }
+        FileLogger.shared.info("buildRooms complete: \(rooms.count) rooms")
 
         // Asynchronously log the actual user agent for the first room
         if let firstWV = rooms.first?.value {
@@ -267,6 +344,7 @@ final class MultitudeModel: NSObject, ObservableObject {
                     guard let self = self, let ua = result as? String else { return }
                     Task { @MainActor in
                         self.addDebug("Actual UA: \(ua)")
+                        FileLogger.shared.info("Actual user agent: \(ua)")
                     }
                 }
             }
@@ -276,26 +354,51 @@ final class MultitudeModel: NSObject, ObservableObject {
     // MARK: - Navigation
 
     func loadService(_ service: GoogleService) {
-        guard let id = activeAccountId, let wv = rooms[id] else { return }
+        guard let id = activeAccountId, let wv = rooms[id] else {
+            FileLogger.shared.warning("loadService: no active account or web view for service=\(service.title)")
+            return
+        }
+        let name = displayName(for: id)
+        FileLogger.shared.info("loadService: \(service.title) for \(name) (id: \(id))")
+
         currentService = service
         if let idx = accounts.firstIndex(where: { $0.id == id }) {
             accounts[idx].lastService = service
             saveAccounts()
+            FileLogger.shared.debug("Persisted lastService=\(service.title) for \(name)")
         }
+        let url = service.url.absoluteString
+        FileLogger.shared.debug("Loading URL: \(url)")
         wv.load(URLRequest(url: service.url))
         addDebug("\(service.title) loaded in \(displayName(for: id))")
     }
 
     func reload() {
-        activeWebView?.reload()
+        guard let wv = activeWebView else {
+            FileLogger.shared.warning("reload called but no active web view")
+            return
+        }
+        let url = wv.url?.absoluteString ?? "?"
+        FileLogger.shared.info("Reloading: \(url)")
+        wv.reload()
     }
 
     func goBack() {
-        activeWebView?.goBack()
+        guard let wv = activeWebView else {
+            FileLogger.shared.warning("goBack called but no active web view")
+            return
+        }
+        FileLogger.shared.info("goBack: canGoBack=\(wv.canGoBack), current=\(wv.url?.absoluteString ?? "?")")
+        wv.goBack()
     }
 
     func goForward() {
-        activeWebView?.goForward()
+        guard let wv = activeWebView else {
+            FileLogger.shared.warning("goForward called but no active web view")
+            return
+        }
+        FileLogger.shared.info("goForward: canGoForward=\(wv.canGoForward), current=\(wv.url?.absoluteString ?? "?")")
+        wv.goForward()
     }
 
     // MARK: - Debug
@@ -323,13 +426,18 @@ final class MultitudeModel: NSObject, ObservableObject {
 
 extension MultitudeModel {
     private func startBadgeTimer() {
+        FileLogger.shared.info("startBadgeTimer: setting up 30s recurring timer + 5s initial check")
+
         badgeTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            FileLogger.shared.debug("Badge timer fired (30s tick)")
             Task { @MainActor in
                 self?.checkAllUnreadCounts()
             }
         }
+
         // Also check immediately after a short delay
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            FileLogger.shared.debug("Initial 5s badge check firing")
             Task { @MainActor in
                 self?.checkAllUnreadCounts()
             }
@@ -337,41 +445,92 @@ extension MultitudeModel {
     }
 
     func checkAllUnreadCounts() {
+        FileLogger.shared.debug("checkAllUnreadCounts: checking \(rooms.count) rooms")
+        let activeId = activeAccountId
         for (id, wv) in rooms {
-            wv.evaluateJavaScript("document.title") { [weak self] result, _ in
-                guard let self = self,
-                      let title = result as? String
-                else { return }
-                let count = Self.parseGmailUnreadCount(from: title)
-                let old = self.lastKnownBadges[id] ?? 0
-                Task { @MainActor in
-                    self.unreadBadges[id] = count
-                    self.lastKnownBadges[id] = count
-                    // Dock badge
-                    let total = self.unreadBadges.values.reduce(0, +)
-                    NSApplication.shared.dockTile.badgeLabel = total > 0 ? "\(total)" : nil
-                    // Notification for new mail
-                    if count > old, let acct = self.accounts.first(where: { $0.id == id }) {
-                        self.postLocalNotification(for: acct, count: count)
-                    }
+            let isActive = id == activeId
+            FileLogger.shared.debug("  Queueing check for room \(id) (active=\(isActive))")
+            checkUnread(for: wv, accountId: id)
+        }
+        FileLogger.shared.debug("checkAllUnreadCounts: done queuing")
+    }
+
+    /// Check the unread count for a single web view and update its badge.
+    private func checkUnread(for webView: WKWebView, accountId: UUID) {
+        let name = displayName(for: accountId)
+        let currentUrl = webView.url?.absoluteString ?? "nil"
+
+        FileLogger.shared.debug("checkUnread: \(name) url=\(currentUrl)")
+
+        webView.evaluateJavaScript("document.title") { [weak self] result, error in
+            guard let self = self else { return }
+
+            if let error = error {
+                FileLogger.shared.warning("checkUnread JS error for \(name): \(error.localizedDescription)")
+                return
+            }
+
+            guard let title = result as? String else {
+                FileLogger.shared.warning("checkUnread JS returned nil/non-string for \(name) (result type: \(type(of: result)))")
+                return
+            }
+
+            FileLogger.shared.debug("checkUnread: \(name) document.title = '\(title)'")
+
+            let count = Self.parseGmailUnreadCount(from: title)
+            let old = self.lastKnownBadges[accountId] ?? 0
+
+            FileLogger.shared.info("checkUnread: \(name) parsed=\(count) old=\(old)")
+
+            Task { @MainActor in
+                self.unreadBadges[accountId] = count
+                self.lastKnownBadges[accountId] = count
+
+                FileLogger.shared.debug("checkUnread: updated unreadBadges[\(accountId)] = \(count)")
+
+                // Dock badge
+                let total = self.unreadBadges.values.reduce(0, +)
+                NSApplication.shared.dockTile.badgeLabel = total > 0 ? "\(total)" : nil
+                FileLogger.shared.debug("Dock badge updated: total=\(total)")
+
+                // Notification for new mail
+                if count > old, let acct = self.accounts.first(where: { $0.id == accountId }) {
+                    FileLogger.shared.info("New mail notification for \(acct.displayName): \(count) unread")
+                    self.postLocalNotification(for: acct, count: count)
                 }
             }
         }
     }
 
     /// Parse Gmail's unread count from the page title.
-    /// Gmail formats: `"(3) Inbox - user@gmail.com - Gmail"`
+    /// Gmail format: `"Inbox (3) - user@gmail.com - Gmail"`
     private static func parseGmailUnreadCount(from title: String) -> Int {
         let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard t.hasPrefix("("), let end = t.firstIndex(of: ")") else { return 0 }
-        let num = t[t.index(after: t.startIndex) ..< end]
-        return Int(num) ?? 0
+
+        // Find the first '(' and the following ')'
+        guard let start = t.firstIndex(of: "("),
+              let end = t.firstIndex(of: ")"),
+              start < end
+        else {
+            let preview = t.prefix(80)
+            FileLogger.shared.debug("parseGmailUnreadCount: no () pair in title='\(preview)'")
+            return 0
+        }
+
+        let num = t[t.index(after: start) ..< end]
+        let parsed = Int(num) ?? 0
+        FileLogger.shared.debug("parseGmailUnreadCount: found '\(num)' → \(parsed) in title='\(t.prefix(80))'")
+        return parsed
     }
 
     // MARK: Notifications
 
     private func requestNotificationPermission() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.badge, .sound, .alert]) { granted, _ in
+        UNUserNotificationCenter.current().requestAuthorization(options: [.badge, .sound, .alert]) { granted, error in
+            if let error = error {
+                FileLogger.shared.error("Notification permission error: \(error.localizedDescription)")
+            }
+            FileLogger.shared.info("Notification permission granted: \(granted)")
             print("Multitude notification permission: \(granted)")
         }
     }
@@ -386,7 +545,11 @@ extension MultitudeModel {
             content: content,
             trigger: nil
         )
-        UNUserNotificationCenter.current().add(request)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                FileLogger.shared.error("Failed to post notification: \(error.localizedDescription)")
+            }
+        }
     }
 }
 
@@ -395,40 +558,63 @@ extension MultitudeModel {
 extension MultitudeModel: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         let room = name(for: webView)
-        addDebug("[\(room)] Start: \(webView.url?.absoluteString ?? "?")")
+        let url = webView.url?.absoluteString ?? "?"
+        addDebug("[\(room)] Start: \(url)")
+        FileLogger.shared.info("Nav START [\(room)] \(url)")
+    }
+
+    func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
+        let room = name(for: webView)
+        let url = webView.url?.absoluteString ?? "?"
+        addDebug("[\(room)] Redirect: \(url)")
+        FileLogger.shared.info("Nav REDIRECT [\(room)] \(url)")
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         let room = name(for: webView)
         let url = webView.url?.absoluteString ?? ""
+        let title = webView.title ?? ""
         addDebug("[\(room)] Finish: \(url)")
+        FileLogger.shared.info("Nav FINISH [\(room)] url='\(url)' title='\(title)'")
+
         if webView === activeWebView {
             currentURL = url
             pageTitle = webView.title ?? ""
+            FileLogger.shared.debug("Active web view updated: url='\(url)' title='\(title)'")
+        }
+
+        // Check unread count as soon as a page finishes loading
+        if let id = rooms.first(where: { $0.value === webView })?.key {
+            FileLogger.shared.debug("Nav FINISH → triggering unread check for \(room)")
+            checkUnread(for: webView, accountId: id)
+        } else {
+            FileLogger.shared.warning("Nav FINISH but no matching room found for webView")
         }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         let room = name(for: webView)
+        let url = webView.url?.absoluteString ?? "?"
         addDebug("[\(room)] Error: \(error.localizedDescription)")
+        FileLogger.shared.error("Nav FAIL [\(room)] \(url) error=\(error.localizedDescription)")
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         let room = name(for: webView)
+        let url = webView.url?.absoluteString ?? "?"
         addDebug("[\(room)] Provisional error: \(error.localizedDescription)")
-    }
-
-    func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
-        let room = name(for: webView)
-        addDebug("[\(room)] Redirect: \(webView.url?.absoluteString ?? "?")")
+        FileLogger.shared.error("Nav PROVISIONAL FAIL [\(room)] \(url) error=\(error.localizedDescription)")
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         let room = name(for: webView)
         addDebug("[\(room)] Process terminated")
+        FileLogger.shared.warning("Web content process terminated [\(room)]")
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, preferences: WKWebpagePreferences, decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
+        let url = navigationAction.request.url?.absoluteString ?? "?"
+        FileLogger.shared.debug("Nav POLICY allow: \(url)")
         decisionHandler(.allow, preferences)
     }
 }
@@ -445,6 +631,7 @@ extension MultitudeModel: WKUIDelegate {
     ) {
         let room = name(for: webView)
         addDebug("[\(room)] Media permission: \(type) from \(origin.host)")
+        FileLogger.shared.info("Media permission granted: type=\(type.rawValue) host=\(origin.host) [\(room)]")
         decisionHandler(.grant)
     }
 
@@ -457,6 +644,7 @@ extension MultitudeModel: WKUIDelegate {
         if let url = navigationAction.request.url {
             let room = name(for: webView)
             addDebug("[\(room)] Popup, loading in-room: \(url.absoluteString)")
+            FileLogger.shared.info("Popup redirected in-room: \(url.absoluteString) [\(room)]")
             webView.load(navigationAction.request)
         }
         return nil
@@ -470,6 +658,7 @@ extension MultitudeModel: WKUIDelegate {
     ) {
         let room = name(for: webView)
         addDebug("[\(room)] JS Alert: \(message.prefix(120))")
+        FileLogger.shared.debug("JS Alert [\(room)]: \(message.prefix(200))")
         completionHandler()
     }
 }

@@ -188,15 +188,14 @@ struct RoomRowView: View {
 
                 Spacer()
 
-                // Badge
+                // Badge — proper circle
                 if unreadCount > 0 {
                     Text("\(unreadCount)")
-                        .font(.caption2.bold())
+                        .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
+                        .frame(width: unreadCount > 9 ? 24 : 18, height: 18)
                         .background(Color.red)
-                        .clipShape(Capsule())
+                        .clipShape(Circle())
                 }
 
                 // Shortcut hint
