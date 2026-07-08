@@ -1,13 +1,13 @@
 # Multitude
 
-A macOS desktop app that lets you run multiple Google accounts side-by-side — each in its own fully isolated browser session. Switch between Gmail, Calendar, Drive, and Meet with a click.
+A macOS desktop app that lets you run multiple Google accounts side-by-side — each in its own fully isolated browser session. Switch between any Google service (Gmail, Calendar, Drive, Meet, Docs, Sheets, and more) with a click.
 
 ![](assets/intro.jpg)
 
 ## Features
 
 - **Multi‑account rooms** — Sign into a different Google account in each room. Cookies, localStorage, and IndexedDB never leak between them.
-- **Service tabs** — Pill‑shaped tabs for Gmail, Calendar, Drive, and Meet. The active tab loads automatically when you switch rooms.
+- **Service tabs** — Configurable pill‑shaped tabs for any Google service (Gmail, Calendar, Drive, Meet, Docs, Sheets, Slides, Keep, Photos, Maps, YouTube, News, Gemini, Chat, and more). The active tab loads automatically when you switch rooms.
 - **Gmail unread badges** — Unread counts appear on the Gmail pill and in the sidebar (powered by Gmail's RSS feed).
 - **Navigation controls** — Back, forward, and reload buttons in the toolbar.
 - **Room keyboard shortcuts** — `⌘1`–`⌘9` to jump between rooms.
@@ -55,16 +55,28 @@ The `.app` bundle is required for camera and microphone permissions — macOS re
 
 ### Service tabs
 
-The toolbar shows four pill‑shaped tabs:
+The toolbar shows pill‑shaped tabs for your enabled Google services. Click the gear icon (⚙️) next to the pills to configure which services appear:
 
-| Pill       | URL                          |
-|------------|------------------------------|
-| Gmail      | mail.google.com              |
-| Calendar   | calendar.google.com           |
-| Drive      | drive.google.com              |
-| Meet       | meet.google.com               |
+Available services:
 
-Clicking a pill navigates the current room's web view. The active tab is highlighted and auto‑selects when you switch rooms.
+| Service   | URL                           |
+|-----------|-------------------------------|
+| Gmail     | mail.google.com               |
+| Calendar  | calendar.google.com           |
+| Drive     | drive.google.com              |
+| Meet      | meet.google.com               |
+| Docs      | docs.google.com/document      |
+| Sheets    | docs.google.com/spreadsheets  |
+| Slides    | docs.google.com/presentation  |
+| Keep      | keep.google.com               |
+| Photos    | photos.google.com             |
+| Maps      | maps.google.com               |
+| YouTube   | youtube.com                   |
+| News      | news.google.com               |
+| Gemini    | gemini.google.com             |
+| Chat      | chat.google.com               |
+
+Clicking a pill navigates the current room's web view. The active tab is highlighted and auto‑selects when you switch rooms. Service preferences are saved across launches.
 
 ### Navigation
 
