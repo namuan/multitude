@@ -106,22 +106,3 @@ Tail live:
 tail -f ~/Library/Logs/Multitude/multitude-$(date +%F).log
 ```
 
-## Architecture
-
-```
-Sources/Multitude/
-├── MultitudeApp.swift       # @main — WindowGroup, CommandMenu
-├── MultitudeModel.swift     # ObservableObject — state, WKNavigationDelegate, unread polling
-├── ContentView.swift        # HSplitView — sidebar + web view + debug panel
-├── ServicePillBar.swift     # Toolbar — back/forward/reload + pill tabs
-├── WebViewFactory.swift     # WKWebView with isolated data store
-├── WebViewContainer.swift   # NSViewRepresentable wrapper
-├── Models.swift             # MultitudeAccount, GoogleService enum
-└── Logger.swift             # FileLogger with rolling daily files
-```
-
-### Key design decisions
-
-- **Isolated data stores** — Each room gets a `WKWebsiteDataStore` keyed by a stable `storeIdentifier` UUID. This keeps Google sessions fully separate.
-- **Unread polling** — Gmail unread counts come from `https://mail.google.com/mail/feed/atom` using the room's cookies extracted from `WKHTTPCookieStore`.
-- **App bundle** — Swift Package Manager builds a raw binary. The Makefile and `install.command` wrap it in a `Multitude.app` with `Supporting/Info.plist` so macOS grants camera/mic permissions.
