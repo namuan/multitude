@@ -5,6 +5,18 @@ import AVFoundation
 
 // MARK: - MultitudeModel
 
+private final class ExternalLinkDialogButtonTarget: NSObject {
+    private let handler: (NSApplication.ModalResponse) -> Void
+
+    init(handler: @escaping (NSApplication.ModalResponse) -> Void) {
+        self.handler = handler
+    }
+
+    @objc func buttonPressed(_ sender: NSButton) {
+        handler(NSApplication.ModalResponse(rawValue: sender.tag))
+    }
+}
+
 /// Central state owner for Multitude.
 ///
 /// Responsibilities:
@@ -411,28 +423,58 @@ final class MultitudeModel: NSObject, ObservableObject {
         }
     }
 
-    /// Shows a confirmation alert with a browser picker.
-    /// The URL goes in `informativeText` for natural sizing. The browser
-    /// picker sits in a fixed-width accessory view that anchors the dialog
-    /// width, so the buttons stay in the same place for every link.
+    /// Shows a confirmation dialog with a browser picker.
+    /// This is a custom modal panel rather than an `NSAlert` so the action
+    /// buttons can be forced into a left-to-right horizontal row.
     /// Returns the user's choice and the selected browser bundle ID.
     private func askToOpenExternally(url: URL, domain: String) -> (result: AskExternalLinkResult, browserBundleID: String?) {
-        let alert = NSAlert()
-        alert.messageText = "Open \(domain) in your default browser?"
-        alert.informativeText = url.absoluteString
-        alert.addButton(withTitle: "Open Once")
-        alert.addButton(withTitle: "Always Open")
-        alert.addButton(withTitle: "Cancel")
-        alert.buttons.last?.keyEquivalent = "\u{1b}"
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 250),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = "Open External Link"
+        panel.isReleasedWhenClosed = false
+        panel.level = .modalPanel
 
-        // ── Browser picker inside a fixed-frame container ──
-        // Container uses a frame so NSAlert can position it. Subviews use
-        // Auto Layout so the popup stretches to fill the row width.
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 22))
+        let contentView = NSView(frame: panel.contentView?.bounds ?? .zero)
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+
+        let titleLabel = NSTextField(labelWithString: "Open \(domain) in your default browser?")
+        titleLabel.font = NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)
+        titleLabel.lineBreakMode = .byWordWrapping
+        titleLabel.maximumNumberOfLines = 2
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let urlTextView = NSTextView()
+        urlTextView.string = url.absoluteString
+        urlTextView.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        urlTextView.textColor = .secondaryLabelColor
+        urlTextView.isEditable = false
+        urlTextView.isSelectable = true
+        urlTextView.drawsBackground = false
+        urlTextView.textContainerInset = NSSize(width: 0, height: 0)
+        urlTextView.textContainer?.lineFragmentPadding = 0
+        urlTextView.textContainer?.widthTracksTextView = true
+        urlTextView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+
+        let urlScrollView = NSScrollView()
+        urlScrollView.documentView = urlTextView
+        urlScrollView.hasVerticalScroller = true
+        urlScrollView.hasHorizontalScroller = false
+        urlScrollView.borderType = .noBorder
+        urlScrollView.drawsBackground = false
+        urlScrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        let pickerRow = NSStackView()
+        pickerRow.orientation = .horizontal
+        pickerRow.alignment = .centerY
+        pickerRow.spacing = 8
+        pickerRow.translatesAutoresizingMaskIntoConstraints = false
 
         let pickerLabel = NSTextField(labelWithString: "Open with:")
         pickerLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize(for: .small))
-        pickerLabel.translatesAutoresizingMaskIntoConstraints = false
         pickerLabel.setContentHuggingPriority(.required, for: .horizontal)
 
         let popUp = NSPopUpButton()
@@ -443,20 +485,67 @@ final class MultitudeModel: NSObject, ObservableObject {
         popUp.translatesAutoresizingMaskIntoConstraints = false
         popUp.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        container.addSubview(pickerLabel)
-        container.addSubview(popUp)
+        pickerRow.addArrangedSubview(pickerLabel)
+        pickerRow.addArrangedSubview(popUp)
+
+        let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
+        cancelButton.tag = NSApplication.ModalResponse.cancel.rawValue
+        cancelButton.keyEquivalent = "\u{1b}"
+
+        let alwaysOpenButton = NSButton(title: "Always Open", target: nil, action: nil)
+        alwaysOpenButton.tag = NSApplication.ModalResponse.alertSecondButtonReturn.rawValue
+
+        let openOnceButton = NSButton(title: "Open Once", target: nil, action: nil)
+        openOnceButton.tag = NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        openOnceButton.keyEquivalent = "\r"
+        openOnceButton.bezelStyle = .rounded
+
+        let buttonRow = NSStackView(views: [cancelButton, alwaysOpenButton, openOnceButton])
+        buttonRow.orientation = .horizontal
+        buttonRow.alignment = .centerY
+        buttonRow.distribution = .fill
+        buttonRow.spacing = 8
+        buttonRow.translatesAutoresizingMaskIntoConstraints = false
+
+        let buttonTarget = ExternalLinkDialogButtonTarget { response in
+            NSApplication.shared.stopModal(withCode: response)
+            panel.close()
+        }
+        for button in [cancelButton, alwaysOpenButton, openOnceButton] {
+            button.target = buttonTarget
+            button.action = #selector(ExternalLinkDialogButtonTarget.buttonPressed(_:))
+        }
+
+        contentView.addSubview(titleLabel)
+        contentView.addSubview(urlScrollView)
+        contentView.addSubview(pickerRow)
+        contentView.addSubview(buttonRow)
+        panel.contentView = contentView
 
         NSLayoutConstraint.activate([
-            pickerLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            pickerLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            popUp.leadingAnchor.constraint(equalTo: pickerLabel.trailingAnchor, constant: 8),
-            popUp.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -2),
-            popUp.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            contentView.widthAnchor.constraint(equalToConstant: 560),
+            contentView.heightAnchor.constraint(equalToConstant: 250),
+
+            titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 22),
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
+
+            urlScrollView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
+            urlScrollView.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            urlScrollView.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            urlScrollView.heightAnchor.constraint(equalToConstant: 72),
+
+            pickerRow.topAnchor.constraint(equalTo: urlScrollView.bottomAnchor, constant: 18),
+            pickerRow.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            pickerRow.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            popUp.widthAnchor.constraint(greaterThanOrEqualToConstant: 260),
+
+            buttonRow.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            buttonRow.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20),
         ])
 
-        alert.accessoryView = container
-
-        let response = alert.runModal()
+        panel.center()
+        let response = NSApplication.shared.runModal(for: panel)
         let selectedIndex = popUp.indexOfSelectedItem
         let browserBundleID: String? = selectedIndex > 0 ? installedBrowsers[selectedIndex - 1].id : nil
 
